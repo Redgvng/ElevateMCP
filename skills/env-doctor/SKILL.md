@@ -5,87 +5,87 @@ description: "Audit env vars for a project — detects missing variables before 
 
 # env-doctor — env vars sanity checker
 
-Évite le `npm run dev` qui plante 30 secondes plus tard sur `DATABASE_URL is undefined`.
+Prevents the `npm run dev` that crashes 30 seconds later with `DATABASE_URL is undefined`.
 
-## Quand invoquer
+## When to invoke
 
-- Premier `git clone` ou switch de branche feature → vérifier qu'on a toutes les env vars requises
-- Avant un déploiement → vérifier qu'aucune env n'est dans le code mais pas dans `.env`
-- Erreur runtime "X is not defined" sur une env var → confirmer si c'est en cause
-- PR review qui ajoute une nouvelle env var → s'assurer qu'elle est dans `.env.example`
-- Nettoyage : trouver les env vars déclarées mais jamais utilisées (legacy)
+- First `git clone` or feature branch switch → verify all required env vars are set
+- Before deployment → ensure no env vars are in code but missing from `.env`
+- Runtime error "X is not defined" on an env var → confirm if it's the root cause
+- PR review adding a new env var → ensure it's in `.env.example`
+- Cleanup: find declared but never used env vars (legacy)
 
-NE PAS invoquer si :
-- Pas de `.env` ni de code touchant aux env vars (pure lib statique)
-- L'env est gérée par un orchestrateur externe (Kubernetes secrets, AWS Parameter Store) qui n'écrit pas dans `.env`
+DO NOT invoke when:
+- No `.env` or code touching env vars (pure static lib)
+- Env is managed by an external orchestrator (Kubernetes secrets, AWS Parameter Store) that doesn't write to `.env`
 
-## Tools disponibles
+## Available tools
 
 | Tool | Usage | Output |
 |---|---|---|
-| `env_check(project)` | Audit complet : missing/unused/undocumented + severity | JSON détaillé |
-| `env_diff(project)` | Diff `.env` vs `.env.example` (which is in which) | JSON court |
-| `required(project)` | Liste des env vars référencées dans le code, file:line | JSON |
-| `template_gen(project)` | Génère un `.env.example` à coller dans le repo | Texte dotenv |
+| `env_check(project)` | Full audit: missing/unused/undocumented + severity | Detailed JSON |
+| `env_diff(project)` | Diff `.env` vs `.env.example` (which is in which) | Short JSON |
+| `required(project)` | List env vars referenced in code, file:line | JSON |
+| `template_gen(project)` | Generates a `.env.example` to paste into the repo | Dotenv text |
 
-## Patterns détectés
+## Detected patterns
 
-JS/TS :
+JS/TS:
 - `process.env.FOO`
 - `process.env["FOO"]`
 - `import.meta.env.FOO` (Vite/Astro)
 
-Python :
+Python:
 - `os.getenv("FOO")` / `os.getenv("FOO", default)`
 - `os.environ["FOO"]`
 - `os.environ.get("FOO")`
 
-Skip dirs : `node_modules`, `.next`, `dist`, `build`, `.git`, `coverage`, `__pycache__`, `.venv`, `venv`.
+Skip dirs: `node_modules`, `.next`, `dist`, `build`, `.git`, `coverage`, `__pycache__`, `.venv`, `venv`.
 
-## Workflow typique : nouveau clone
+## Typical workflow: fresh clone
 
 ```
 1. cd <project>
 2. mcp__env-doctor__env_diff(project=".")
-   → liste vars only_in_example (à demander à un collègue)
+   → lists vars only_in_example (ask a teammate for the real values)
 3. cp .env.example .env
-4. Remplir les vraies valeurs (depuis 1Password, Bitwarden, etc.)
+4. Fill in real values (from 1Password, Bitwarden, etc.)
 5. mcp__env-doctor__env_check(project=".")
-   → si missing > 0 : compléter, sinon "ok"
-6. npm run dev / python ./run.py — devrait booter
+   → if missing > 0: complete them, otherwise "ok"
+6. npm run dev / python ./run.py — should boot cleanly
 ```
 
-## Workflow typique : avant deploy Astrée
+## Typical workflow: pre-deployment
 
 ```
 1. mcp__env-doctor__required(project="/path/to/project")
-   → liste exhaustive des vars utilisées (souvent 30-50+ sur app réel)
-2. Comparer avec la liste des secrets configurés sur l'hébergeur
-3. Pour chaque var missing in env (au runtime cible) → ajouter via secret manager
-4. mcp__env-doctor__env_check(project=".") → confirmer "ok" avant build
+   → exhaustive list of all referenced vars (often 30-50+ on real apps)
+2. Compare against the list of secrets configured on the host
+3. For each missing-in-env (at target runtime) → add via secret manager
+4. mcp__env-doctor__env_check(project=".") → confirm "ok" before build
 ```
 
-## Workflow typique : nettoyage debt
+## Typical workflow: debt cleanup
 
 ```
 1. mcp__env-doctor__env_check(project=".")
    → unused_in_env: ["LEGACY_API_URL", "OLD_FEATURE_FLAG"]
-2. Vérifier git log pour comprendre quand chaque var est devenue obsolète
-3. Retirer du `.env`, `.env.example`, et docs
-4. Documenter en commit "chore: drop unused env vars X, Y"
+2. Check git log to understand when each var became obsolete
+3. Remove from `.env`, `.env.example`, and docs
+4. Document in commit "chore: drop unused env vars X, Y"
 ```
 
 ## Anti-patterns
 
-❌ Ne jamais faire confiance aveuglément à `unused_in_env` — certaines vars sont utilisées par des tools externes (PM2, Docker Compose, scripts shell) qui ne sont pas scannés
-❌ Ne pas committer le `template_gen` output sans le nettoyer — certaines vars sont vraiment optionnelles et n'ont pas leur place dans `.env.example` (ex: `OPENAI_API_KEY` si on est sur Mistral)
-❌ Ne pas utiliser sur un repo monorepo sans préciser le sous-projet — risque de scanner des dossiers non liés et fausser le diff
-❌ Ne pas ignorer les `severity: warning` (undocumented) — c'est ce qui pique un nouveau dev qui clone
+❌ Never blindly trust `unused_in_env` — some vars are used by external tools (PM2, Docker Compose, shell scripts) that aren't scanned
+❌ Don't commit `template_gen` output without cleaning — some vars are truly optional and shouldn't be in `.env.example` (e.g. `OPENAI_API_KEY` if you're on Mistral)
+❌ Don't use on a monorepo without specifying the sub-project — risks scanning unrelated folders and skewing the diff
+❌ Don't ignore `severity: warning` (undocumented) — that's what bites a new dev on clone
 
-## Cas typique : Next.js complexe
+## Typical case: complex Next.js app
 
-Une app Next.js réelle (auth + DB + payment + storage + LLM) compte facilement 30-50+ env vars (`DATABASE_URL`, `NEXTAUTH_*`, `STRIPE_*`, `S3_*`, etc.). `check(/path/to/project)` doit être lancé après chaque `git pull` et avant chaque `npm run dev`. Si `missing > 0`, le worker peut crash silencieusement.
+A real Next.js app (auth + DB + payment + storage + LLM) easily has 30-50+ env vars (`DATABASE_URL`, `NEXTAUTH_*`, `STRIPE_*`, `S3_*`, etc.). `check(/path/to/project)` should run after every `git pull` and before every `npm run dev`. If `missing > 0`, the worker may crash silently.
 
 ## ROI
 
-~5-10 min/incident × 1-2/jour pour un dev solo polyglotte. Ramené à un usage hebdo régulier : ~10 min/semaine. Faible quotidien mais évite des debug frustrants.
+~5-10 min/incident × 1-2/day for a polyglot solo dev. Weekly regular use: ~10 min/week. Low daily cost but avoids frustrating debug sessions.

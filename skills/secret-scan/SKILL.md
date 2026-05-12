@@ -5,80 +5,80 @@ description: "Detect leaked secrets in git diffs, history, or single files. Hybr
 
 # Secret scanner (gitleaks-backed or builtin patterns)
 
-Empêche les fuites de secrets en git diff, staged content, ou history. Critère de défense en profondeur sur un working tree de 21 entrées Astrée.
+Prevents secret leaks in git diffs, staged content, or commit history. Defense-in-depth for multi-project working trees.
 
-## Quand invoquer
+## When to invoke
 
-- Avant chaque `git commit` ou push (idéalement en pre-commit hook)
-- Lors d'une revue de PR (scan de la diff vs main)
-- Audit d'un repo récupéré (scan history sur N commits)
-- Quand l'utilisateur copie-colle du code suspect ou un .env
-- Ajout d'une nouvelle dépendance externe (vérifier qu'elle ne demande pas un secret embarqué)
+- Before every `git commit` or push (ideally as a pre-commit hook)
+- During PR review (scan diff vs main)
+- Auditing a retrieved repo (scan N commits of history)
+- When pasting suspicious code or a .env file
+- Adding a new external dependency (verify it doesn't bundle embedded secrets)
 
-NE PAS invoquer si :
-- Le contenu scanné est notoirement public (ex: lib open source en lecture)
-- Pour debug d'un secret connu (utiliser `op` CLI ou vault directement)
+DO NOT invoke when:
+- The scanned content is publicly known (e.g. open-source lib, read-only)
+- Debugging a known secret (use vault CLI directly instead)
 
-## Tools disponibles
+## Available tools
 
-| Tool | Usage | Garde-fou |
+| Tool | Usage | Guardrail |
 |---|---|---|
-| `scan_status` | Mode actif (gitleaks/builtin), version, count patterns | aucun |
-| `scan_staged(repo)` | Scan git staged content (pre-commit-style) | repo path validé |
-| `scan_diff(target_ref, repo)` | Diff entre HEAD et un ref | refs validées |
-| `scan_history(depth, repo)` | Last N commits, capped à 1000 | depth borné |
+| `scan_status` | Active mode (gitleaks/builtin), version, pattern count | none |
+| `scan_staged(repo)` | Scan git staged content (pre-commit style) | repo path validated |
+| `scan_diff(target_ref, repo)` | Diff between HEAD and a ref | refs validated |
+| `scan_history(depth, repo)` | Last N commits, capped at 1000 | depth bounded |
 | `scan_file(path)` | Single file scan | absolute or cwd-relative |
-| `add_pattern(name, regex)` | Custom regex en RAM (perdu au restart) | regex validé via re.compile |
+| `add_pattern(name, regex)` | Custom regex in RAM (lost on restart) | regex validated via re.compile |
 
-## Mode gitleaks (préféré)
+## Gitleaks mode (preferred)
 
-Si `gitleaks` est dans le PATH (binaire installé dans `~/.local/bin/gitleaks`), le MCP utilise `gitleaks detect`/`protect` avec leurs rules battle-tested (~150 patterns). Output JSON natif gitleaks, prêt à parser.
+If `gitleaks` is on PATH (binary installed in `~/.local/bin/gitleaks`), the MCP uses `gitleaks detect`/`protect` with battle-tested rules (~150 patterns). Native gitleaks JSON output, ready to parse.
 
-## Mode builtin (fallback)
+## Builtin mode (fallback)
 
-16 patterns essentiels :
+16 essential patterns:
 - AWS: AKIA*
 - GitHub: ghp_, gho_, ghs_
 - Stripe: sk_live_, sk_test_, pk_live_
 - OpenAI, Anthropic, Google, Slack
 - JWT (3-part base64url)
-- nvapi-, mistral_key (avec contexte)
+- nvapi-, mistral_key (with context)
 - PEM private keys
-- Generic api_key / secret_key (regex strict ≥24 chars)
+- Generic api_key / secret_key (strict regex ≥24 chars)
 
-Builtin = défense de base. Gitleaks = défense complète.
+Builtin = basic defense. Gitleaks = full defense.
 
-## Workflow typique : audit Astrée working tree
+## Typical workflow: pre-commit audit
 
 ```
-1. mcp__secret-scan__scan_status()                              → check mode (devrait être gitleaks)
-2. mcp__secret-scan__scan_staged(repo="/path/to/project")  → pre-commit
-3. mcp__secret-scan__scan_diff(target_ref="origin/main")   → diff branche
-4. Si findings : trier par rule (filtrer faux positifs : test fixtures, dummy keys)
-5. Pour vrais leaks :
-   - Si pas encore commité : `git restore --staged <file>` + remplacer la valeur
-   - Si déjà commité : `git filter-repo` + ROTATION du secret réel
+1. mcp__secret-scan__scan_status()                           → check mode (should be gitleaks)
+2. mcp__secret-scan__scan_staged(repo="/path/to/project")    → pre-commit
+3. mcp__secret-scan__scan_diff(target_ref="origin/main")     → branch diff
+4. If findings: triage by rule (filter false positives: test fixtures, dummy keys)
+5. For real leaks:
+   - Not yet committed: `git restore --staged <file>` + replace value
+   - Already committed: `git filter-repo` + ROTATE the real secret
 ```
 
-## Workflow audit history (post-incident)
+## Typical workflow: post-incident history audit
 
 ```
 1. mcp__secret-scan__scan_history(depth=200, repo="/path/to/project")
-2. Lister les findings par commit
-3. Pour chaque rule trouvée → ROTATION immédiate du secret (Stripe, OpenAI, AWS, etc.)
-4. NE PAS rebase l'history publique sans coordination
-5. Documenter l'incident (compliance log)
+2. List findings per commit
+3. For each rule found → IMMEDIATE secret rotation (Stripe, OpenAI, AWS, etc.)
+4. Do NOT rebase public history without coordination
+5. Document the incident (compliance log)
 ```
 
 ## Anti-patterns
 
-❌ Ne jamais print/log la valeur complète d'un secret — le MCP masque déjà (last 4 chars), garder le masque
-❌ Ne pas se contenter du builtin si gitleaks est dispo — toujours installer gitleaks dans `~/.local/bin/`
-❌ Ne pas commiter un `add_pattern` custom dans le code — c'est en RAM, ajouter au server.py si pattern stable
-❌ Ne pas utiliser pour des secrets de DEV (placeholders, dummy values) — false positives noise
-❌ Ne pas remplacer par `grep` simple — les patterns sont contextuels (ex: Mistral key requiert contexte mistral/scaleway)
+❌ Never print/log the full secret value — the MCP already masks (last 4 chars), keep it masked
+❌ Don't rely on builtin if gitleaks is available — always install gitleaks in `~/.local/bin/`
+❌ Don't commit a custom `add_pattern` into code — it's in RAM, add to server.py if stable
+❌ Don't use for DEV secrets (placeholders, dummy values) — false positive noise
+❌ Don't replace with raw `grep` — patterns are contextual (e.g. Mistral key requires mistral/scaleway context)
 
-## Installation gitleaks (si absent)
+## Installing gitleaks (if missing)
 
 ```bash
 curl -sL "https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_*_linux_x64.tar.gz" -o /tmp/gl.tgz
@@ -90,6 +90,6 @@ gitleaks version
 
 ## ROI
 
-- 1 leak évité = rotation pas faite = pas de réseau monitoring CRA, pas de risque réputationnel.
-- En continu : ~2 min/commit pour le réflexe scan, ~3 min/jour économisés en paranoïa éliminée.
-- Hook pre-commit recommandé après stabilisation.
+- 1 leak avoided = no rotation needed = no monitoring network alert, no reputational risk.
+- Ongoing: ~2 min/commit for the scan reflex, ~3 min/day saved by eliminating paranoia.
+- Pre-commit hook recommended after stabilization.

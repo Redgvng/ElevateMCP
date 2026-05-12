@@ -1,36 +1,36 @@
 ---
 name: mcp-development
-description: "Patterns and conventions for building new MCP servers in CommandCode (Python FastMCP, stdio transport, ~/.commandcode/mcp-servers/). Covers boilerplate, tool design, schema parsing, garde-fous (denylist/dryRun/audit), handshake testing, registration in mcp.json, and the central rule: do NOT MCP-ify mature CLI tools (NIH trap). Use when the user asks to create a new MCP, refactor an existing one, or evaluate whether a feature should be MCP/skill/script."
+description: "Patterns and conventions for building new MCP servers in CommandCode (Python FastMCP, stdio transport, ~/.commandcode/mcp-servers/). Covers boilerplate, tool design, schema parsing, guardrails (denylist/dryRun/audit), handshake testing, registration in mcp.json, and the central rule: do NOT MCP-ify mature CLI tools (NIH trap). Use when the user asks to create a new MCP, refactor an existing one, or evaluate whether a feature should be MCP/skill/script."
 ---
 
 # MCP development for CommandCode
 
-Conventions pour développer un nouveau MCP server qui s'intègre proprement dans la flotte CommandCode.
+Conventions for building a new MCP server that integrates cleanly into the CommandCode fleet.
 
-## La règle de coupe (LIRE EN PREMIER)
+## The cutoff rule (READ FIRST)
 
-> Si un outil CLI mature existe (>1k★ >2 ans), **interdiction de MCP-ifier** sauf si tu ajoutes un agrégat ou un état impossible en bash. Sinon = skill markdown qui pipe vers le CLI.
+> If a mature CLI tool exists (>1k★ >2 years), **do not MCP-ify it** unless you add aggregation or state impossible in bash. Otherwise = markdown skill that pipes to the CLI.
 
-**Corollaire** : un MCP ne se justifie QUE si son output structuré est consommé par un agent dans une boucle (ex: scan → autofix → re-scan).
+**Corollary**: an MCP is only justified if its structured output is consumed by an agent in a loop (e.g. scan → autofix → re-scan).
 
-Anti-patterns à refuser même si l'utilisateur insiste :
-- `bench-diff` → utilise `hyperfine` + `git notes`
+Anti-patterns to refuse even if the user insists:
+- `bench-diff` → use `hyperfine` + `git notes`
 - `dep-audit` → `npm audit` + `npm-check-updates` + `depcheck`
-- `http-craft` → Bruno (open source, fichiers `.bru` versionnés)
+- `http-craft` → Bruno (open source, `.bru` files versioned)
 - `todo-radar` → `rg "TODO|FIXME" --json | jq` + skill
-- Wrapper d'outil cloud existant qui marche bien
+- Wrapper for an existing cloud tool that already works well
 
-## Convention de structure
+## Structure convention
 
 ```
 ~/.commandcode/mcp-servers/<name>/
 ├── server.py        # FastMCP server, stdio transport
-└── (data/)          # cache disque optionnel (~/.commandcode/data/<name>/)
+└── (data/)          # optional disk cache (~/.commandcode/data/<name>/)
 ```
 
-Pas de `__init__.py`, pas de package. Un fichier `server.py` autonome.
+No `__init__.py`, no package. A single standalone `server.py` file.
 
-## Boilerplate minimal
+## Minimal boilerplate
 
 ```python
 #!/usr/bin/env python3
@@ -59,40 +59,40 @@ if __name__ == "__main__":
     mcp.run()
 ```
 
-## Stack & dépendances
+## Stack & dependencies
 
-- **Python 3.12** dans `~/.commandcode/venv/` (déjà présent)
-- **mcp 1.27** (FastMCP) — déjà installé
-- **Préférer stdlib pure** quand possible (json, re, pathlib, urllib, subprocess)
-- Si lib externe nécessaire : ajouter au `pip install` de `~/.commandcode/venv/` et documenter dans la note basic-memory du catalogue
-- Outils CLI externes : détecter via `shutil.which()` et fail-graceful, jamais crash
+- **Python 3.12** in `~/.commandcode/venv/` (already present)
+- **mcp 1.27** (FastMCP) — already installed
+- **Prefer pure stdlib** when possible (json, re, pathlib, urllib, subprocess)
+- If an external lib is needed: add to `pip install` in `~/.commandcode/venv/` and document in the catalog memory note
+- External CLI tools: detect via `shutil.which()` and fail-graceful, never crash
 
-## Garde-fous critiques (à intégrer SYSTÉMATIQUEMENT)
+## Critical guardrails (ALWAYS integrate)
 
-### Pour les MCP qui mutent
-- **Denylist hard** : `.env`, `.ssh`, `.aws`, `/etc/`, secrets refusés côté MCP, pas côté prompt
-- **dryRun=True par défaut**, mutation effective requiert flag explicite
-- **Audit log** : chaque mutation logguée (path, action, before/after)
+### For mutating MCPs
+- **Hard denylist**: `.env`, `.ssh`, `.aws`, `/etc/`, secrets rejected MCP-side, not prompt-side
+- **dryRun=True by default**, actual mutation requires an explicit flag
+- **Audit log**: every mutation logged (path, action, before/after)
 
-### Pour les MCP avec scope tenant (Astrée)
-- **cabinetId REQUIS** sur tools tenant-scoped, le MCP refuse sans
-- **Refus si cabinetId vide ou whitespace**
+### For tenant-scoped MCPs
+- **projectId REQUIRED** on tenant-scoped tools, the MCP refuses without it
+- **Refuse if projectId is empty or whitespace**
 
-### Pour les MCP qui appellent des APIs externes
-- **Timeout explicite** (10s par défaut)
-- **Fail-fast graceful** : retour JSON `{"error": "..."}`, jamais crash le serveur
-- **Pas de retry agressif** — le client MCP gère
+### For MCPs calling external APIs
+- **Explicit timeout** (10s default)
+- **Fail-fast graceful**: return JSON `{"error": "..."}`, never crash the server
+- **No aggressive retry** — the MCP client handles that
 
-## Validation pré-enregistrement
+## Pre-registration validation
 
-3 checks obligatoires avant d'ajouter à `mcp.json` :
+3 mandatory checks before adding to `mcp.json`:
 
 ```bash
 # 1. Syntax check
 ~/path/to/venv/bin/python -m py_compile ~/.commandcode/mcp-servers/<name>/server.py
 
-# 2. Handshake MCP (initialize → tools/list)
-# Voir /tmp pattern :
+# 2. MCP Handshake (initialize → tools/list)
+# See /tmp pattern:
 ~/path/to/venv/bin/python <<'EOF'
 import json, subprocess
 PY = os.path.expanduser('~/.commandcode/venv/bin/python')  # adjust to your install
@@ -109,48 +109,48 @@ for line in out.splitlines():
         print('OK', len(msg['result']['tools']), 'tools:', [t['name'] for t in msg['result']['tools']])
 EOF
 
-# 3. Smoke test : 1 tool/call représentatif
-# (similaire au handshake mais avec method='tools/call')
+# 3. Smoke test: 1 representative tool/call
+# (similar to handshake but with method='tools/call')
 ```
 
-## Enregistrement dans le gateway
+## Registering in the gateway
 
-Ajouter le serveur dans `mcp-servers/gateway/_registry.py` :
+Add the server in `mcp-servers/gateway/_registry.py`:
 
 ```python
-TOOLS["mon-outil"] = ["outil_a", "outil_b"]
-# Si un nom entre en conflit avec un outil existant :
-RENAMES["mon-outil"] = {"outil_a": "mon_outil_a"}
+TOOLS["my-tool"] = ["tool_a", "tool_b"]
+# If a name conflicts with an existing tool:
+RENAMES["my-tool"] = {"tool_a": "my_tool_a"}
 ```
 
-Le gateway (`ElevateMCP`) recharge automatiquement les modules au démarrage — redémarrer l'agent suffit.
+The gateway (`ElevateMCP`) auto-reloads modules on startup — restarting the agent is enough.
 
-> **Note:** Ne plus ajouter d'entrée individuelle dans `mcp.json`. Depuis ElevateMCP, une seule entrée `ElevateMCP` gère tous les serveurs.
+> **Note:** No longer add individual entries in `mcp.json`. Since ElevateMCP, a single `ElevateMCP` entry manages all servers.
 
-## Skill associée (recommandé)
+## Associated skill (recommended)
 
-Pour chaque MCP non trivial, créer une skill `~/.commandcode/skills/<name>/SKILL.md` qui :
-- Décrit QUAND invoquer (use cases)
-- Décrit QUAND ne PAS invoquer
-- Liste les tools avec garde-fous
-- Donne 1-3 workflows typiques
-- Liste les anti-patterns
-- Chiffre le ROI
+For every non-trivial MCP, create a skill `~/.commandcode/skills/<name>/SKILL.md` that:
+- Describes WHEN to invoke (use cases)
+- Describes when NOT to invoke
+- Lists the tools with guardrails
+- Gives 1-3 typical workflows
+- Lists anti-patterns
+- Quantifies ROI
 
-C'est cette skill que l'agent consultera, pas le code Python du server. Sans skill, le MCP est sous-utilisé.
+It's this skill that the agent will consult, not the Python server code. Without a skill, the MCP is underused.
 
-## Documentation mémoire
+## Memory documentation
 
-Après ajout d'un MCP :
-1. Update `~/.ccs/.../memory/commandcode_setup.md` (compteurs servers + tools)
-2. Update basic-memory `main/projects/commandcode/command-code-catalogue-mcp-built-ideas` (cocher l'idée si elle y était, ou ajouter)
-3. Si stratégique, créer une note dédiée
+After adding an MCP:
+1. Update the server and tool counters in your memory notes
+2. Update the MCP catalog (check the idea if it was listed, or add it)
+3. If strategic, create a dedicated note
 
-## Erreurs à éviter
+## Mistakes to avoid
 
-❌ Coder le MCP avant d'avoir vérifié qu'aucun outil CLI mature ne fait déjà le job
-❌ Ajouter 7 tools alors que 2 suffiraient pour le ROI réel (scope creep)
-❌ Faire un MCP qui réimplémente un autre déjà installé (doublon)
-❌ Output non structuré (texte brut) → impossible à consommer par l'agent en boucle
-❌ Pas de garde-fous → fuite secrets ou mutation prod accidentelle
-❌ Pas de skill associée → MCP sous-utilisé, devient mort-né en 60 jours
+❌ Coding the MCP before checking that no mature CLI tool already does the job
+❌ Adding 7 tools when 2 would suffice for the real ROI (scope creep)
+❌ Building an MCP that duplicates another already installed (double-dip)
+❌ Unstructured output (raw text) → impossible for the agent to consume in a loop
+❌ No guardrails → secret leak or accidental production mutation
+❌ No associated skill → MCP underused, dead in 60 days
