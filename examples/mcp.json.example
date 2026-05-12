@@ -1,0 +1,11 @@
+{
+  "_comment": "Example mcp.json — adjust paths to match your install. install.sh generates this automatically.",
+  "mcpServers": {
+    "ElevateMCP": {
+      "transport": "stdio",
+      "enabled": true,
+      "command": "${HOME}/.commandcode/venv/bin/python",
+      "args": ["${HOME}/.commandcode/mcp-servers/gateway/server.py"]
+    }
+  }
+}

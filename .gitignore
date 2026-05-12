@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local installs / caches
+.cache/
+*.bak
+*.bak.*
+mcp-cache/
+semantic-cache/
+
+# User-local example overrides
+mcp.json.local
+settings.json.local
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets (never commit)
+.env
+.env.local
+.env.production
